@@ -1,0 +1,20 @@
+# Local PostgreSQL for development
+# Start: docker compose up -d
+# Stop:  docker compose down
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: fabrixfactory-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: fabrixfactory
+    ports:
+      - "5434:5432"
+    volumes:
+      - fabrixfactory_postgres_data:/var/lib/postgresql/data
+
+volumes:
+  fabrixfactory_postgres_data:

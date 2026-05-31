@@ -1,0 +1,11 @@
+// Main schema — generator & datasource only.
+// Domain models live in prisma/*.prisma and prisma/{masters,catalog,customers,quotes}/
+
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}

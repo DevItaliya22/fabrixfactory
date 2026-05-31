@@ -1,0 +1,66 @@
+model Quote {
+  id          String  @id @default(uuid()) @db.Uuid
+  quoteNumber String? @unique @map("quote_number")
+
+  customerId String? @map("customer_id") @db.Uuid
+
+  contactName  String? @map("contact_name")
+  contactEmail String? @map("contact_email")
+  contactPhone String? @map("contact_phone")
+
+  shippingAddressId String? @map("shipping_address_id") @db.Uuid
+  billingAddressId  String? @map("billing_address_id") @db.Uuid
+
+  status QuoteStatus @default(PENDING)
+
+  subtotal      Decimal? @db.Decimal(14, 2)
+  shippingTotal Decimal? @map("shipping_total") @db.Decimal(14, 2)
+  discountTotal Decimal? @map("discount_total") @db.Decimal(14, 2)
+  grandTotal    Decimal? @map("grand_total") @db.Decimal(14, 2)
+
+  discountCodeId String?   @map("discount_code_id") @db.Uuid
+  notes          String?   @db.Text
+  validUntil     DateTime? @map("valid_until")
+  extraInfo      Json?     @map("extra_info")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  customer        Customer?     @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  shippingAddress Address?      @relation("QuoteShippingAddress", fields: [shippingAddressId], references: [id], onDelete: SetNull)
+  billingAddress  Address?      @relation("QuoteBillingAddress", fields: [billingAddressId], references: [id], onDelete: SetNull)
+  discountCode    DiscountCode? @relation(fields: [discountCodeId], references: [id], onDelete: SetNull)
+
+  lineItems QuoteLineItem[]
+
+  @@index([status, createdAt])
+  @@index([customerId])
+  @@index([contactEmail])
+  @@map("quotes")
+}
+
+model QuoteLineItem {
+  id        String  @id @default(uuid()) @db.Uuid
+  quoteId   String  @map("quote_id") @db.Uuid
+  productId String  @map("product_id") @db.Uuid
+  colourId  String? @map("colour_id") @db.Uuid
+  widthId   String? @map("width_id") @db.Uuid
+
+  quantity     Decimal?    @db.Decimal(10, 2)
+  quantityUnit LengthUnit? @default(METRE) @map("quantity_unit")
+
+  unitRate       Decimal? @map("unit_rate") @db.Decimal(12, 2)
+  shippingCharge Decimal? @map("shipping_charge") @db.Decimal(12, 2)
+  lineTotal      Decimal? @map("line_total") @db.Decimal(14, 2)
+
+  notes     String?
+  extraInfo Json?   @map("extra_info")
+
+  quote   Quote   @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+  colour  Colour? @relation(fields: [colourId], references: [id], onDelete: SetNull)
+  width   Width?  @relation(fields: [widthId], references: [id], onDelete: SetNull)
+
+  @@index([quoteId])
+  @@map("quote_line_items")
+}

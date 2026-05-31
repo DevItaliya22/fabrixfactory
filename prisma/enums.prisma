@@ -1,0 +1,71 @@
+enum ProductStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum StockStatus {
+  IN_STOCK
+  LOW_STOCK
+  OUT_OF_STOCK
+  PRE_ORDER
+  DISCONTINUED
+}
+
+enum WeightUnit {
+  METRE
+  PIECE
+  YARD
+}
+
+enum LengthUnit {
+  METRE
+  YARD
+}
+
+enum OfferType {
+  PERCENTAGE
+  FIXED_PRICE
+}
+
+enum DiscountType {
+  PERCENTAGE
+  FIXED_AMOUNT
+}
+
+enum DiscountScope {
+  ENTIRE_ORDER
+  SHIPPING
+  PRODUCT
+}
+
+enum QuoteStatus {
+  DRAFT
+  PENDING
+  SENT
+  ACCEPTED
+  REJECTED
+  EXPIRED
+  CANCELLED
+}
+
+enum AddressType {
+  SHIPPING
+  BILLING
+}
+
+enum CustomFieldEntity {
+  PRODUCT
+  COLLECTION
+  QUOTE
+  CUSTOMER
+}
+
+enum CustomFieldType {
+  TEXT
+  TEXTAREA
+  URL
+  NUMBER
+  BOOLEAN
+  JSON
+}

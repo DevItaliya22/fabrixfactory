@@ -1,0 +1,41 @@
+model Customer {
+  id        String   @id @default(uuid()) @db.Uuid
+  email     String?  @unique
+  firstName String?  @map("first_name")
+  lastName  String?  @map("last_name")
+  phone     String?
+  company   String?
+  extraInfo Json?    @map("extra_info")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  addresses Address[]
+  quotes    Quote[]
+
+  @@map("customers")
+}
+
+model Address {
+  id         String       @id @default(uuid()) @db.Uuid
+  customerId String?      @map("customer_id") @db.Uuid
+  type       AddressType?
+  label      String?
+  line1      String?
+  line2      String?
+  city       String?
+  state      String?
+  postalCode String?      @map("postal_code")
+  country    String?      @default("IN")
+  isDefault  Boolean      @default(false) @map("is_default")
+  extraInfo  Json?        @map("extra_info")
+  createdAt  DateTime     @default(now()) @map("created_at")
+  updatedAt  DateTime     @updatedAt @map("updated_at")
+
+  customer Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  quotesShipping Quote[] @relation("QuoteShippingAddress")
+  quotesBilling  Quote[] @relation("QuoteBillingAddress")
+
+  @@index([customerId])
+  @@map("addresses")
+}

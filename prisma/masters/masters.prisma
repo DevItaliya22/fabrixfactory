@@ -1,0 +1,98 @@
+model Colour {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @unique
+  hexCode   String?  @map("hex_code")
+  isActive  Boolean  @default(true) @map("is_active")
+  sortOrder Int      @default(0) @map("sort_order")
+  extraInfo Json?    @map("extra_info")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  productColours ProductColour[]
+  productImages  ProductImage[]
+  quoteLineItems QuoteLineItem[]
+
+  @@index([isActive, sortOrder])
+  @@map("colours")
+}
+
+model Width {
+  id        String   @id @default(uuid()) @db.Uuid
+  label     String   @unique
+  valueInCm Decimal? @map("value_in_cm") @db.Decimal(8, 2)
+  isActive  Boolean  @default(true) @map("is_active")
+  sortOrder Int      @default(0) @map("sort_order")
+  extraInfo Json?    @map("extra_info")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  products       Product[]
+  quoteLineItems QuoteLineItem[]
+
+  @@index([isActive, sortOrder])
+  @@map("widths")
+}
+
+model LengthPreset {
+  id        String     @id @default(uuid()) @db.Uuid
+  label     String?
+  value     Decimal    @db.Decimal(10, 2)
+  unit      LengthUnit
+  isActive  Boolean    @default(true) @map("is_active")
+  sortOrder Int        @default(0) @map("sort_order")
+  extraInfo Json?      @map("extra_info")
+  createdAt DateTime   @default(now()) @map("created_at")
+  updatedAt DateTime   @updatedAt @map("updated_at")
+
+  productLengths ProductAvailableLength[]
+
+  @@unique([value, unit])
+  @@index([isActive, sortOrder])
+  @@map("length_presets")
+}
+
+model CareInstruction {
+  id          String   @id @default(uuid()) @db.Uuid
+  title       String
+  description String?  @db.Text
+  iconKey     String?  @map("icon_key")
+  isActive    Boolean  @default(true) @map("is_active")
+  sortOrder   Int      @default(0) @map("sort_order")
+  extraInfo   Json?    @map("extra_info")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  productCareInstructions ProductCareInstruction[]
+
+  @@index([isActive, sortOrder])
+  @@map("care_instructions")
+}
+
+model FabricComposition {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @unique
+  description String?  @db.Text
+  isActive    Boolean  @default(true) @map("is_active")
+  sortOrder   Int      @default(0) @map("sort_order")
+  extraInfo   Json?    @map("extra_info")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  products Product[]
+
+  @@index([isActive, sortOrder])
+  @@map("fabric_compositions")
+}
+
+model Tag {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @unique
+  isActive  Boolean  @default(true) @map("is_active")
+  extraInfo Json?    @map("extra_info")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  productTags ProductTag[]
+
+  @@map("tags")
+}

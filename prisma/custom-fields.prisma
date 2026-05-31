@@ -1,0 +1,31 @@
+model CustomFieldDefinition {
+  id         String            @id @default(uuid()) @db.Uuid
+  entityType CustomFieldEntity @map("entity_type")
+  key        String
+  label      String
+  fieldType  CustomFieldType   @map("field_type")
+  config     Json?
+  sortOrder  Int               @default(0) @map("sort_order")
+  isActive   Boolean           @default(true) @map("is_active")
+  createdAt  DateTime          @default(now()) @map("created_at")
+  updatedAt  DateTime          @updatedAt @map("updated_at")
+
+  values CustomFieldValue[]
+
+  @@unique([entityType, key])
+  @@index([entityType, isActive, sortOrder])
+  @@map("custom_field_definitions")
+}
+
+model CustomFieldValue {
+  id           String @id @default(uuid()) @db.Uuid
+  definitionId String @map("definition_id") @db.Uuid
+  entityId     String @map("entity_id") @db.Uuid
+  value        Json?
+
+  definition CustomFieldDefinition @relation(fields: [definitionId], references: [id], onDelete: Cascade)
+
+  @@unique([definitionId, entityId])
+  @@index([entityId])
+  @@map("custom_field_values")
+}
