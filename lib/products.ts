@@ -1,5 +1,99 @@
 import type { Prisma } from "@/app/generated/prisma/client";
 
+import { db } from "@/lib/db";
+import {
+  formatProductUrl,
+  getCollectionPathSlugs,
+  type CollectionNode,
+} from "@/lib/collections";
+
+export type SlugConflict = {
+  collectionId: string;
+  path: string;
+  productId: string;
+  productName: string;
+};
+
+export type SlugAvailabilityResult = {
+  available: boolean;
+  conflicts: SlugConflict[];
+};
+
+export async function checkProductSlugAvailability(
+  slug: string,
+  collectionIds: string[],
+  excludeProductId?: string,
+): Promise<SlugAvailabilityResult> {
+  const trimmed = slug.trim();
+  if (!trimmed || collectionIds.length === 0) {
+    return { available: true, conflicts: [] };
+  }
+
+  const collections = await db.collection.findMany({
+    where: { id: { in: collectionIds } },
+    select: { id: true, name: true, slug: true, parentId: true },
+  });
+
+  const collectionNodes: CollectionNode[] = await db.collection.findMany({
+    where: { isActive: true },
+    select: {
+      id: true,
+      name: true,
+      slug: true,
+      parentId: true,
+      parent: { select: { name: true } },
+    },
+  });
+
+  const conflicts: SlugConflict[] = [];
+
+  for (const collection of collections) {
+    const existing = await db.productCollection.findFirst({
+      where: {
+        collectionId: collection.id,
+        product: {
+          slug: trimmed,
+          ...(excludeProductId ? { id: { not: excludeProductId } } : {}),
+        },
+      },
+      include: {
+        product: { select: { id: true, name: true } },
+      },
+    });
+
+    if (existing) {
+      const pathSlugs = getCollectionPathSlugs(collection.id, collectionNodes);
+      conflicts.push({
+        collectionId: collection.id,
+        path: formatProductUrl(pathSlugs, trimmed),
+        productId: existing.product.id,
+        productName: existing.product.name,
+      });
+    }
+  }
+
+  return {
+    available: conflicts.length === 0,
+    conflicts,
+  };
+}
+
+export async function assertProductSlugAvailable(
+  slug: string,
+  collectionIds: string[],
+  excludeProductId?: string,
+): Promise<void> {
+  const result = await checkProductSlugAvailability(
+    slug,
+    collectionIds,
+    excludeProductId,
+  );
+  if (!result.available) {
+    const paths = result.conflicts.map((c) => c.path).join(", ");
+    throw new Error(`Slug already used in: ${paths}`);
+  }
+}
+
 export const productDetailInclude = {
   productColours: {
     include: { colour: true },

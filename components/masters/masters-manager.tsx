@@ -12,17 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
-import { Switch } from "@/components/ui/switch";
 import {
   Table,
   TableBody,
@@ -32,14 +22,19 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { CareMastersManager } from "@/components/masters/care-masters-manager";
+import {
+  buildMasterPayload,
+  defaultMasterForm,
+  MasterFormFields,
+  str,
+  type CollectionOption,
+  PARENT_NONE,
+  validateMasterForm,
+} from "@/components/masters/master-form-fields";
 import { formatCollectionLabel } from "@/lib/collections";
 import { MASTER_LABELS, type MasterType } from "@/lib/masters-config";
 
-const PARENT_NONE = "__none__";
-
-type CollectionRow = {
-  id: string;
-  name: string;
+type CollectionRow = CollectionOption & {
   description?: string | null;
   parentId?: string | null;
   parent?: { id: string; name: string } | null;
@@ -56,11 +51,6 @@ function getDisplayName(type: MasterType, item: Record<string, unknown>) {
     return String(item.label ?? `${item.value} ${item.unit}`);
   }
   return String(item.name ?? item.id);
-}
-
-function str(value: unknown): string {
-  if (value == null) return "";
-  return String(value);
 }
 
 function itemToForm(
@@ -114,64 +104,6 @@ function itemToForm(
         isActive,
       };
   }
-}
-
-function defaultForm(type: MasterType): Record<string, string> {
-  const base = { isActive: "true" };
-  switch (type) {
-    case "colour":
-      return { ...base, hexCode: "#cccccc" };
-    case "collection":
-      return { ...base, parentId: PARENT_NONE };
-    case "lengthPreset":
-      return { ...base, unit: "METRE" };
-    default:
-      return base;
-  }
-}
-
-function buildPayload(
-  type: MasterType,
-  form: Record<string, string>,
-): Record<string, unknown> {
-  const payload: Record<string, unknown> = {
-    isActive: form.isActive !== "false",
-  };
-
-  switch (type) {
-    case "colour":
-      payload.name = form.name?.trim();
-      payload.hexCode = form.hexCode?.trim() || null;
-      break;
-    case "width":
-      payload.label = form.label?.trim();
-      payload.valueInCm = form.valueInCm ? parseFloat(form.valueInCm) : null;
-      break;
-    case "fabric":
-      payload.name = form.name?.trim();
-      payload.description = form.description?.trim() || null;
-      break;
-    case "tag":
-      payload.name = form.name?.trim();
-      break;
-    case "collection":
-      payload.name = form.name?.trim();
-      payload.description = form.description?.trim() || null;
-      payload.parentId =
-        form.parentId && form.parentId !== PARENT_NONE ? form.parentId : null;
-      break;
-    case "care":
-      payload.title = form.title?.trim();
-      payload.description = form.description?.trim() || null;
-      break;
-    case "lengthPreset":
-      payload.label = form.label?.trim() || null;
-      payload.value = parseFloat(form.value);
-      payload.unit = form.unit || "METRE";
-      break;
-  }
-
-  return payload;
 }
 
 export function MastersManager({ type }: { type: MasterType }) {
@@ -232,7 +164,7 @@ function MastersManagerInner({ type }: { type: MasterType }) {
 
   const openAdd = () => {
     setEditingId(null);
-    setForm(defaultForm(type));
+    setForm(defaultMasterForm(type));
     setDialogOpen(true);
   };
 
@@ -243,44 +175,10 @@ function MastersManagerInner({ type }: { type: MasterType }) {
   };
 
   const validateForm = (): boolean => {
-    switch (type) {
-      case "colour":
-        if (!form.name?.trim()) {
-          toast.error("Name is required");
-          return false;
-        }
-        break;
-      case "width":
-        if (!form.label?.trim()) {
-          toast.error("Label is required");
-          return false;
-        }
-        break;
-      case "fabric":
-      case "tag":
-        if (!form.name?.trim()) {
-          toast.error("Name is required");
-          return false;
-        }
-        break;
-      case "collection":
-        if (!form.name?.trim()) {
-          toast.error("Name is required");
-          return false;
-        }
-        break;
-      case "care":
-        if (!form.title?.trim()) {
-          toast.error("Title is required");
-          return false;
-        }
-        break;
-      case "lengthPreset":
-        if (!form.value || Number.isNaN(parseFloat(form.value))) {
-          toast.error("Valid length value is required");
-          return false;
-        }
-        break;
+    const error = validateMasterForm(type, form);
+    if (error) {
+      toast.error(error);
+      return false;
     }
     return true;
   };
@@ -290,7 +188,7 @@ function MastersManagerInner({ type }: { type: MasterType }) {
 
     setSaving(true);
     try {
-      const payload = buildPayload(type, form);
+      const payload = buildMasterPayload(type, form);
 
       if (!isEditing) {
         const res = await fetch("/api/masters", {
@@ -340,192 +238,16 @@ function MastersManagerInner({ type }: { type: MasterType }) {
 
   const renderFormFields = () => {
     const collections = (data?.collection ?? []) as CollectionRow[];
-    const parentOptions = collections.filter(
-      (c) => !isEditing || c.id !== editingId,
-    );
 
-    const activeField = (
-      <div className="flex items-center gap-3 pt-1">
-        <Switch
-          id="master-active"
-          checked={form.isActive !== "false"}
-          onCheckedChange={(checked) =>
-            setForm({ ...form, isActive: checked ? "true" : "false" })
-          }
-        />
-        <Label htmlFor="master-active">Active</Label>
-      </div>
+    return (
+      <MasterFormFields
+        type={type}
+        form={form}
+        onChange={setForm}
+        collections={collections}
+        excludeCollectionId={editingId ?? undefined}
+      />
     );
-
-    switch (type) {
-      case "colour":
-        return (
-          <>
-            <Field label="Name">
-              <Input
-                value={form.name ?? ""}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-              />
-            </Field>
-            <Field label="Hex">
-              <Input
-                type="color"
-                value={form.hexCode ?? "#cccccc"}
-                onChange={(e) => setForm({ ...form, hexCode: e.target.value })}
-                className="h-9 w-20"
-              />
-            </Field>
-            {activeField}
-          </>
-        );
-      case "width":
-        return (
-          <>
-            <Field label="Label">
-              <Input
-                value={form.label ?? ""}
-                onChange={(e) => setForm({ ...form, label: e.target.value })}
-              />
-            </Field>
-            <Field label="cm (optional)">
-              <Input
-                type="number"
-                value={form.valueInCm ?? ""}
-                onChange={(e) =>
-                  setForm({ ...form, valueInCm: e.target.value })
-                }
-              />
-            </Field>
-            {activeField}
-          </>
-        );
-      case "fabric":
-        return (
-          <>
-            <Field label="Name">
-              <Input
-                value={form.name ?? ""}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-              />
-            </Field>
-            <Field label="Description (optional)">
-              <Input
-                value={form.description ?? ""}
-                onChange={(e) =>
-                  setForm({ ...form, description: e.target.value })
-                }
-              />
-            </Field>
-            {activeField}
-          </>
-        );
-      case "tag":
-        return (
-          <>
-            <Field label="Name">
-              <Input
-                value={form.name ?? ""}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-              />
-            </Field>
-            {activeField}
-          </>
-        );
-      case "collection":
-        return (
-          <>
-            <Field label="Name">
-              <Input
-                value={form.name ?? ""}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                placeholder="e.g. Summer fabrics"
-              />
-            </Field>
-            <Field label="Parent collection (optional)">
-              <Select
-                value={form.parentId ?? PARENT_NONE}
-                onValueChange={(v) => setForm({ ...form, parentId: v })}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Top-level collection" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={PARENT_NONE}>
-                    None — top-level collection
-                  </SelectItem>
-                  {parentOptions.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {formatCollectionLabel(c.name, c.parent?.name)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field label="Description (optional)">
-              <Input
-                value={form.description ?? ""}
-                onChange={(e) =>
-                  setForm({ ...form, description: e.target.value })
-                }
-              />
-            </Field>
-            {activeField}
-          </>
-        );
-      case "care":
-        return (
-          <>
-            <Field label="Title">
-              <Input
-                value={form.title ?? ""}
-                onChange={(e) => setForm({ ...form, title: e.target.value })}
-              />
-            </Field>
-            <Field label="Description">
-              <Input
-                value={form.description ?? ""}
-                onChange={(e) =>
-                  setForm({ ...form, description: e.target.value })
-                }
-              />
-            </Field>
-            {activeField}
-          </>
-        );
-      case "lengthPreset":
-        return (
-          <>
-            <Field label="Label">
-              <Input
-                value={form.label ?? ""}
-                onChange={(e) => setForm({ ...form, label: e.target.value })}
-              />
-            </Field>
-            <Field label="Value">
-              <Input
-                type="number"
-                value={form.value ?? ""}
-                onChange={(e) => setForm({ ...form, value: e.target.value })}
-              />
-            </Field>
-            <Field label="Unit">
-              <Select
-                value={form.unit ?? "METRE"}
-                onValueChange={(v) => setForm({ ...form, unit: v })}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="METRE">Metre</SelectItem>
-                  <SelectItem value="YARD">Yard</SelectItem>
-                </SelectContent>
-              </Select>
-            </Field>
-            {activeField}
-          </>
-        );
-    }
   };
 
   if (loading) {
@@ -656,21 +378,6 @@ function MastersManagerInner({ type }: { type: MasterType }) {
           )}
         </TableBody>
       </Table>
-    </div>
-  );
-}
-
-function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="space-y-1.5">
-      <Label>{label}</Label>
-      {children}
     </div>
   );
 }

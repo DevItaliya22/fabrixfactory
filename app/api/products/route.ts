@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { db } from "@/lib/db";
 import { serializeProduct, slugify } from "@/lib/format";
-import { productDetailInclude, syncProductRelations } from "@/lib/products";
+import {
+  assertProductSlugAvailable,
+  productDetailInclude,
+  syncProductRelations,
+} from "@/lib/products";
 
 export async function GET() {
   try {
@@ -112,6 +116,19 @@ export async function POST(request: NextRequest) {
     }
 
     const slug = body.slug?.trim() || slugify(body.name);
+
+    if (body.collectionIds?.length) {
+      try {
+        await assertProductSlugAvailable(slug, body.collectionIds);
+      } catch (err) {
+        return NextResponse.json(
+          {
+            error: err instanceof Error ? err.message : "Slug already in use",
+          },
+          { status: 409 },
+        );
+      }
+    }
 
     const product = await db.$transaction(async (tx) => {
       const created = await tx.product.create({

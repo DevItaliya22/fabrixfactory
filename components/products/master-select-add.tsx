@@ -1,16 +1,18 @@
 "use client";
 
 import { useState } from "react";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
-import { Field, FieldLabel } from "@/components/ui/field";
 import {
-  Popover,
-  PopoverContent,
-  PopoverHeader,
-  PopoverTitle,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Field, FieldLabel } from "@/components/ui/field";
 import {
   Select,
   SelectContent,
@@ -19,6 +21,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
+import {
+  buildMasterPayload,
+  defaultMasterForm,
+  MasterFormFields,
+  type CollectionOption,
+  validateMasterForm,
+} from "@/components/masters/master-form-fields";
+import type { MasterType } from "@/lib/masters-config";
 
 type Option = { id: string; label: string };
 
@@ -28,11 +38,11 @@ type MasterSelectAddProps = {
   value?: string;
   onValueChange: (id: string) => void;
   options: Option[];
-  popoverTitle: string;
+  masterType: MasterType;
+  dialogTitle: string;
   adding?: boolean;
-  onConfirmAdd: () => void | Promise<void>;
-  children: React.ReactNode;
-  /** Reset dropdown after pick — useful when selecting adds to a list */
+  onConfirmAdd: (payload: Record<string, unknown>) => void | Promise<void>;
+  collections?: CollectionOption[];
   clearOnSelect?: boolean;
   emptyMessage?: string;
 };
@@ -43,24 +53,42 @@ export function MasterSelectAdd({
   value,
   onValueChange,
   options,
-  popoverTitle,
+  masterType,
+  dialogTitle,
   adding,
   onConfirmAdd,
-  children,
+  collections = [],
   clearOnSelect,
   emptyMessage = "Nothing yet — use + to add",
 }: MasterSelectAddProps) {
   const [open, setOpen] = useState(false);
   const [pickerKey, setPickerKey] = useState(0);
+  const [form, setForm] = useState<Record<string, string>>(() =>
+    defaultMasterForm(masterType),
+  );
 
   const handleSelect = (id: string) => {
     onValueChange(id);
     if (clearOnSelect) setPickerKey((k) => k + 1);
   };
 
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next);
+    if (next) {
+      setForm(defaultMasterForm(masterType));
+    }
+  };
+
   const handleConfirm = async () => {
-    await onConfirmAdd();
+    const error = validateMasterForm(masterType, form);
+    if (error) {
+      toast.error(error);
+      return;
+    }
+    const payload = buildMasterPayload(masterType, form);
+    await onConfirmAdd(payload);
     setOpen(false);
+    setForm(defaultMasterForm(masterType));
   };
 
   return (
@@ -90,38 +118,53 @@ export function MasterSelectAdd({
           </SelectContent>
         </Select>
 
-        <Popover open={open} onOpenChange={setOpen}>
-          <PopoverTrigger asChild>
-            <Button
-              type="button"
-              variant="outline"
-              className="shrink-0 px-3"
-              aria-label={`Add ${label}`}
-            >
-              +
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent align="end" className="w-80">
-            <PopoverHeader>
-              <PopoverTitle>{popoverTitle}</PopoverTitle>
-            </PopoverHeader>
-            <div className="flex flex-col gap-3">{children}</div>
-            <Button
-              type="button"
-              className="w-full"
-              disabled={adding}
-              onClick={handleConfirm}
-            >
-              {adding ? (
-                <>
-                  <Spinner /> Adding…
-                </>
-              ) : (
-                "Add"
-              )}
-            </Button>
-          </PopoverContent>
-        </Popover>
+        <Button
+          type="button"
+          variant="outline"
+          className="shrink-0 px-3"
+          aria-label={`Add ${label}`}
+          onClick={() => handleOpenChange(true)}
+        >
+          +
+        </Button>
+
+        <Dialog open={open} onOpenChange={handleOpenChange}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{dialogTitle}</DialogTitle>
+              <DialogDescription className="sr-only">
+                Create a new {label.toLowerCase()} entry.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3">
+              <MasterFormFields
+                type={masterType}
+                form={form}
+                onChange={setForm}
+                collections={collections}
+                showActiveToggle={false}
+              />
+            </div>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button type="button" disabled={adding} onClick={handleConfirm}>
+                {adding ? (
+                  <>
+                    <Spinner /> Adding…
+                  </>
+                ) : (
+                  "Add"
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </Field>
   );

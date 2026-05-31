@@ -1,18 +1,12 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, FieldGroup, FieldLabel, FieldSet } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -28,10 +22,22 @@ import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
-import { Textarea } from "@/components/ui/textarea";
 import { MasterSelectAdd } from "@/components/products/master-select-add";
-import { formatCollectionLabel } from "@/lib/collections";
+import {
+  formatProductUrl,
+  getCollectionPathNames,
+  getCollectionPathSlugs,
+  type CollectionNode,
+} from "@/lib/collections";
 import { slugify } from "@/lib/format";
+import {
+  formatSlugConflictMessage,
+  isInvalidDecimalInput,
+  parseNonNegativeDecimal,
+  validateRateTiers,
+  type RateTierRow,
+} from "@/lib/product-form-validation";
+import type { SlugConflict } from "@/lib/products";
 
 type FormOptions = {
   widths: { id: string; label: string; valueInCm?: string | null }[];
@@ -148,15 +154,6 @@ function collectAllImages(
   return result;
 }
 
-type RateTierRow = {
-  id: string;
-  minQuantity: string;
-  maxQuantity: string;
-  originalRate: string;
-  discountedRate: string;
-  shippingCharge: string;
-};
-
 type LengthRow = {
   id: string;
   lengthPresetId?: string;
@@ -195,8 +192,6 @@ export function ProductCreateForm({ productId }: { productId?: string } = {}) {
   const [slug, setSlug] = useState("");
   const [skuCode, setSkuCode] = useState("");
   const [description, setDescription] = useState("");
-  const [metaTitle, setMetaTitle] = useState("");
-  const [metaDesc, setMetaDesc] = useState("");
 
   // Attributes
   const [widthId, setWidthId] = useState<string>();
@@ -227,8 +222,10 @@ export function ProductCreateForm({ productId }: { productId?: string } = {}) {
     emptyImageRow(),
   ]);
   const [selectedCollections, setSelectedCollections] = useState<string[]>([]);
-  const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [selectedCare, setSelectedCare] = useState<string[]>([]);
+  const [slugConflicts, setSlugConflicts] = useState<SlugConflict[]>([]);
+  const [checkingSlug, setCheckingSlug] = useState(false);
+  const [tierErrors, setTierErrors] = useState<Record<string, string>>({});
 
   const [rateTiers, setRateTiers] = useState<RateTierRow[]>([
     {
@@ -242,20 +239,6 @@ export function ProductCreateForm({ productId }: { productId?: string } = {}) {
   ]);
   const [availableLengths, setAvailableLengths] = useState<LengthRow[]>([]);
 
-  // Inline master forms
-  const [newColourName, setNewColourName] = useState("");
-  const [newColourHex, setNewColourHex] = useState("#cccccc");
-  const [newWidthLabel, setNewWidthLabel] = useState("");
-  const [newWidthCm, setNewWidthCm] = useState("");
-  const [newFabricName, setNewFabricName] = useState("");
-  const [newTagName, setNewTagName] = useState("");
-  const [newCollectionName, setNewCollectionName] = useState("");
-  const [newCollectionParentId, setNewCollectionParentId] = useState<string>();
-  const [newCareTitle, setNewCareTitle] = useState("");
-  const [newCareDesc, setNewCareDesc] = useState("");
-  const [newLengthLabel, setNewLengthLabel] = useState("");
-  const [newLengthValue, setNewLengthValue] = useState("");
-  const [newLengthUnit, setNewLengthUnit] = useState("METRE");
   const [addingMaster, setAddingMaster] = useState<string | null>(null);
 
   const loadOptions = useCallback(async () => {
@@ -303,8 +286,6 @@ export function ProductCreateForm({ productId }: { productId?: string } = {}) {
         setSlug(p.slug ?? "");
         setSkuCode(p.skuCode ?? "");
         setDescription(p.description ?? "");
-        setMetaTitle(p.metaTitle ?? "");
-        setMetaDesc(p.metaDesc ?? "");
         setWidthId(p.widthId ?? undefined);
         setFabricId(p.fabricCompositionId ?? undefined);
         setWeightValue(p.weightValue != null ? String(p.weightValue) : "");
@@ -407,9 +388,6 @@ export function ProductCreateForm({ productId }: { productId?: string } = {}) {
             (c: { collectionId: string }) => c.collectionId,
           ),
         );
-        setSelectedTags(
-          (p.productTags ?? []).map((t: { tagId: string }) => t.tagId),
-        );
       })
       .catch(() => {
         if (!cancelled) toast.error("Failed to load product");
@@ -422,6 +400,44 @@ export function ProductCreateForm({ productId }: { productId?: string } = {}) {
       cancelled = true;
     };
   }, [productId, options]);
+
+  const collectionNodes: CollectionNode[] = useMemo(
+    () => options?.collections ?? [],
+    [options?.collections],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const timer = setTimeout(async () => {
+      const trimmed = slug.trim();
+      if (!trimmed || selectedCollections.length === 0) {
+        if (!cancelled) setSlugConflicts([]);
+        return;
+      }
+
+      setCheckingSlug(true);
+      try {
+        const params = new URLSearchParams({
+          slug: trimmed,
+          collectionIds: selectedCollections.join(","),
+        });
+        if (productId) params.set("excludeProductId", productId);
+        const res = await fetch(`/api/products/check-slug?${params}`);
+        const data = await res.json();
+        if (!cancelled) setSlugConflicts(data.conflicts ?? []);
+      } catch {
+        if (!cancelled) setSlugConflicts([]);
+      } finally {
+        if (!cancelled) setCheckingSlug(false);
+      }
+    }, 400);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [slug, selectedCollections, productId]);
 
   const createMaster = async (
     type: string,
@@ -524,8 +540,6 @@ export function ProductCreateForm({ productId }: { productId?: string } = {}) {
     setSlug("");
     setSkuCode("");
     setDescription("");
-    setMetaTitle("");
-    setMetaDesc("");
     setWidthId(undefined);
     setFabricId(undefined);
     setWeightValue("");
@@ -543,8 +557,8 @@ export function ProductCreateForm({ productId }: { productId?: string } = {}) {
     setColourImages({});
     setGeneralImages([emptyImageRow()]);
     setSelectedCollections([]);
-    setSelectedTags([]);
     setSelectedCare([]);
+    setSlugConflicts([]);
     setAvailableLengths([]);
     setRateTiers([
       {
@@ -562,6 +576,38 @@ export function ProductCreateForm({ productId }: { productId?: string } = {}) {
     e.preventDefault();
     if (!name.trim()) {
       toast.error("Product name is required");
+      return;
+    }
+
+    if (slugConflicts.length > 0) {
+      toast.error(formatSlugConflictMessage(slugConflicts));
+      return;
+    }
+
+    const tierValidation = validateRateTiers(rateTiers);
+    setTierErrors(tierValidation);
+    if (Object.keys(tierValidation).length > 0) {
+      toast.error("Fix pricing tier errors before saving");
+      return;
+    }
+
+    if (
+      isOnOffer &&
+      offerType === "PERCENTAGE" &&
+      offerPercent &&
+      isInvalidDecimalInput(offerPercent)
+    ) {
+      toast.error("Offer % must be zero or greater");
+      return;
+    }
+
+    if (
+      isOnOffer &&
+      offerType === "FIXED_PRICE" &&
+      offerFixedPrice &&
+      isInvalidDecimalInput(offerFixedPrice)
+    ) {
+      toast.error("Offer price must be zero or greater");
       return;
     }
 
@@ -584,8 +630,6 @@ export function ProductCreateForm({ productId }: { productId?: string } = {}) {
         slug: slug.trim() || undefined,
         skuCode: skuCode.trim() || undefined,
         description: description.trim() || undefined,
-        metaTitle: metaTitle.trim() || undefined,
-        metaDesc: metaDesc.trim() || undefined,
         widthId: widthId || undefined,
         fabricCompositionId: fabricId || undefined,
         weightValue: weightValue ? parseFloat(weightValue) : undefined,
@@ -616,16 +660,18 @@ export function ProductCreateForm({ productId }: { productId?: string } = {}) {
           name.trim(),
         ),
         rateTiers: rateTiers
-          .filter((t) => t.originalRate)
+          .filter((t) => t.originalRate.trim())
           .map((t) => ({
-            minQuantity: parseFloat(t.minQuantity) || 0,
-            maxQuantity: t.maxQuantity ? parseFloat(t.maxQuantity) : undefined,
-            originalRate: parseFloat(t.originalRate),
-            discountedRate: t.discountedRate
-              ? parseFloat(t.discountedRate)
+            minQuantity: parseNonNegativeDecimal(t.minQuantity) ?? 0,
+            maxQuantity: t.maxQuantity.trim()
+              ? (parseNonNegativeDecimal(t.maxQuantity) ?? undefined)
               : undefined,
-            shippingCharge: t.shippingCharge
-              ? parseFloat(t.shippingCharge)
+            originalRate: parseNonNegativeDecimal(t.originalRate)!,
+            discountedRate: t.discountedRate.trim()
+              ? (parseNonNegativeDecimal(t.discountedRate) ?? undefined)
+              : undefined,
+            shippingCharge: t.shippingCharge.trim()
+              ? (parseNonNegativeDecimal(t.shippingCharge) ?? undefined)
               : undefined,
           })),
         availableLengths: availableLengths
@@ -637,7 +683,7 @@ export function ProductCreateForm({ productId }: { productId?: string } = {}) {
           })),
         careInstructionIds: selectedCare,
         collectionIds: selectedCollections,
-        tagIds: selectedTags,
+        tagIds: [],
       };
 
       const url = isEdit ? `/api/products/${productId}` : "/api/products";
@@ -685,6 +731,7 @@ export function ProductCreateForm({ productId }: { productId?: string } = {}) {
   }
 
   const colours = options?.colours ?? [];
+  const collections = collectionNodes;
 
   const submitLabel =
     submitPhase === "images"
@@ -713,23 +760,20 @@ export function ProductCreateForm({ productId }: { productId?: string } = {}) {
         </p>
       </div>
 
-      <FormSection
-        step={1}
-        title="Product details"
-        description="Name, identifiers, description, and visibility"
-      >
+      <FormSection step={1} title="Product details">
         <FieldGroup>
-          <Field>
-            <FieldLabel htmlFor="name">Product name *</FieldLabel>
-            <Input
-              id="name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              onBlur={handleNameBlur}
-              required
-            />
-          </Field>
           <div className="grid gap-4 sm:grid-cols-2">
+            <Field>
+              <FieldLabel htmlFor="name">Product name *</FieldLabel>
+              <Input
+                id="name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                onBlur={handleNameBlur}
+                required
+              />
+            </Field>
+
             <Field>
               <FieldLabel htmlFor="slug">URL slug</FieldLabel>
               <Input
@@ -738,7 +782,38 @@ export function ProductCreateForm({ productId }: { productId?: string } = {}) {
                 onChange={(e) => setSlug(e.target.value)}
                 placeholder="auto-from-name"
               />
+              {selectedCollections.length > 0 && slug.trim() ? (
+                <div className="mt-2 space-y-1">
+                  {selectedCollections.map((collectionId) => {
+                    const pathSlugs = getCollectionPathSlugs(
+                      collectionId,
+                      collectionNodes,
+                    );
+                    return (
+                      <p
+                        key={collectionId}
+                        className="text-muted-foreground font-mono text-xs"
+                      >
+                        /{formatProductUrl(pathSlugs, slug.trim())}
+                      </p>
+                    );
+                  })}
+                </div>
+              ) : null}
+              {checkingSlug ? (
+                <p className="text-muted-foreground mt-1 text-xs">
+                  Checking slug…
+                </p>
+              ) : null}
+              {slugConflicts.length > 0 ? (
+                <p className="text-destructive mt-1 text-xs">
+                  {formatSlugConflictMessage(slugConflicts)}
+                </p>
+              ) : null}
             </Field>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
             <Field>
               <FieldLabel htmlFor="sku">SKU code</FieldLabel>
               <Input
@@ -747,7 +822,22 @@ export function ProductCreateForm({ productId }: { productId?: string } = {}) {
                 onChange={(e) => setSkuCode(e.target.value)}
               />
             </Field>
+
+            <Field>
+              <FieldLabel>Publish status</FieldLabel>
+              <Select value={status} onValueChange={setStatus}>
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="DRAFT">Draft</SelectItem>
+                  <SelectItem value="PUBLISHED">Published</SelectItem>
+                  <SelectItem value="ARCHIVED">Archived</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
           </div>
+
           <Field>
             <FieldLabel htmlFor="description">Description</FieldLabel>
             <RichTextEditor
@@ -757,33 +847,80 @@ export function ProductCreateForm({ productId }: { productId?: string } = {}) {
               placeholder="Fabric feel, use cases, key selling points…"
             />
           </Field>
-          <Field>
-            <FieldLabel>Publish status</FieldLabel>
-            <Select value={status} onValueChange={setStatus}>
-              <SelectTrigger className="w-full sm:w-56">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="DRAFT">Draft</SelectItem>
-                <SelectItem value="PUBLISHED">Published</SelectItem>
-                <SelectItem value="ARCHIVED">Archived</SelectItem>
-              </SelectContent>
-            </Select>
-          </Field>
+
+          <FieldSet>
+            <MasterSelectAdd
+              label="Collection"
+              placeholder="Select collection to add"
+              masterType="collection"
+              dialogTitle="New collection"
+              clearOnSelect
+              collections={collections}
+              onValueChange={(id) => {
+                if (!selectedCollections.includes(id)) {
+                  setSelectedCollections((prev) => [...prev, id]);
+                }
+              }}
+              options={collections
+                .filter((c) => !selectedCollections.includes(c.id))
+                .map((c) => ({
+                  id: c.id,
+                  label: getCollectionPathNames(c.id, collectionNodes).join(
+                    " › ",
+                  ),
+                }))}
+              adding={addingMaster === "collection"}
+              onConfirmAdd={(payload) =>
+                createMaster("collection", payload, (item) => {
+                  setSelectedCollections((prev) => [...prev, item.id]);
+                })
+              }
+              emptyMessage="All collections selected or none yet"
+            />
+            {selectedCollections.length > 0 && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {selectedCollections.map((id) => {
+                  const col = collections.find((c) => c.id === id);
+                  return (
+                    <Badge
+                      key={id}
+                      variant="secondary"
+                      className="gap-2 py-1 pr-1 pl-2"
+                    >
+                      {col
+                        ? getCollectionPathNames(id, collectionNodes).join(
+                            " › ",
+                          )
+                        : id}
+                      <button
+                        type="button"
+                        className="hover:bg-muted rounded px-1 text-xs"
+                        onClick={() =>
+                          setSelectedCollections((prev) =>
+                            prev.filter((x) => x !== id),
+                          )
+                        }
+                      >
+                        ×
+                      </button>
+                    </Badge>
+                  );
+                })}
+              </div>
+            )}
+          </FieldSet>
         </FieldGroup>
       </FormSection>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <FormSection
-          step={2}
-          title="Material & inventory"
-          description="Physical specs and stock"
-        >
+        <FormSection step={2} title="Material & inventory">
           <FieldGroup>
             <div className="grid gap-4 sm:grid-cols-2">
               <MasterSelectAdd
                 label="Width"
                 placeholder="Select width"
+                masterType="width"
+                dialogTitle="New width"
                 value={widthId}
                 onValueChange={setWidthId}
                 options={
@@ -792,41 +929,17 @@ export function ProductCreateForm({ productId }: { productId?: string } = {}) {
                     label: w.label,
                   })) ?? []
                 }
-                popoverTitle="New width"
                 adding={addingMaster === "width"}
-                onConfirmAdd={() =>
-                  createMaster(
-                    "width",
-                    {
-                      label: newWidthLabel,
-                      valueInCm: newWidthCm
-                        ? parseFloat(newWidthCm)
-                        : undefined,
-                    },
-                    (item) => {
-                      setWidthId(item.id);
-                      setNewWidthLabel("");
-                      setNewWidthCm("");
-                    },
-                  )
+                onConfirmAdd={(payload) =>
+                  createMaster("width", payload, (item) => setWidthId(item.id))
                 }
-              >
-                <Input
-                  placeholder="Label e.g. 44 inches"
-                  value={newWidthLabel}
-                  onChange={(e) => setNewWidthLabel(e.target.value)}
-                />
-                <Input
-                  placeholder="cm (optional)"
-                  type="number"
-                  value={newWidthCm}
-                  onChange={(e) => setNewWidthCm(e.target.value)}
-                />
-              </MasterSelectAdd>
+              />
 
               <MasterSelectAdd
                 label="Fabric composition"
                 placeholder="Select fabric"
+                masterType="fabric"
+                dialogTitle="New fabric"
                 value={fabricId}
                 onValueChange={setFabricId}
                 options={
@@ -835,21 +948,13 @@ export function ProductCreateForm({ productId }: { productId?: string } = {}) {
                     label: f.name,
                   })) ?? []
                 }
-                popoverTitle="New fabric"
                 adding={addingMaster === "fabric"}
-                onConfirmAdd={() =>
-                  createMaster("fabric", { name: newFabricName }, (item) => {
-                    setFabricId(item.id);
-                    setNewFabricName("");
-                  })
+                onConfirmAdd={(payload) =>
+                  createMaster("fabric", payload, (item) =>
+                    setFabricId(item.id),
+                  )
                 }
-              >
-                <Input
-                  placeholder="e.g. 100% Cotton"
-                  value={newFabricName}
-                  onChange={(e) => setNewFabricName(e.target.value)}
-                />
-              </MasterSelectAdd>
+              />
             </div>
 
             <div className="grid gap-4 sm:grid-cols-3">
@@ -895,14 +1000,12 @@ export function ProductCreateForm({ productId }: { productId?: string } = {}) {
           </FieldGroup>
         </FormSection>
 
-        <FormSection
-          step={3}
-          title="Colour variants"
-          description="Which colours this fabric is sold in"
-        >
+        <FormSection step={3} title="Colour variants">
           <MasterSelectAdd
             label="Colour"
             placeholder="Select colour to add"
+            masterType="colour"
+            dialogTitle="New colour"
             clearOnSelect
             onValueChange={(id) => {
               if (!selectedColours.includes(id)) toggleColour(id);
@@ -910,35 +1013,14 @@ export function ProductCreateForm({ productId }: { productId?: string } = {}) {
             options={colours
               .filter((c) => !selectedColours.includes(c.id))
               .map((c) => ({ id: c.id, label: c.name }))}
-            popoverTitle="New colour"
             adding={addingMaster === "colour"}
-            onConfirmAdd={() =>
-              createMaster(
-                "colour",
-                { name: newColourName, hexCode: newColourHex },
-                (item) => {
-                  if (!selectedColours.includes(item.id)) toggleColour(item.id);
-                  setNewColourName("");
-                },
-              )
+            onConfirmAdd={(payload) =>
+              createMaster("colour", payload, (item) => {
+                if (!selectedColours.includes(item.id)) toggleColour(item.id);
+              })
             }
             emptyMessage="All colours selected or none yet"
-          >
-            <Input
-              placeholder="Colour name"
-              value={newColourName}
-              onChange={(e) => setNewColourName(e.target.value)}
-            />
-            <div className="flex items-center gap-2">
-              <Input
-                type="color"
-                value={newColourHex}
-                onChange={(e) => setNewColourHex(e.target.value)}
-                className="h-9 w-14 p-1"
-              />
-              <span className="text-muted-foreground text-sm">Hex colour</span>
-            </div>
-          </MasterSelectAdd>
+          />
 
           {selectedColours.length > 0 && (
             <>
@@ -993,17 +1075,10 @@ export function ProductCreateForm({ productId }: { productId?: string } = {}) {
         </FormSection>
       </div>
 
-      <FormSection
-        step={4}
-        title="Product images"
-        description="Pick files now — they upload to storage when you save the product"
-      >
+      <FormSection step={4} title="Product images">
         <div className="space-y-8">
           <div className="space-y-3">
-            <h3 className="text-sm font-medium">Main gallery</h3>
-            <p className="text-muted-foreground text-sm">
-              Shown on the product page (not tied to one colour)
-            </p>
+            <h3 className="text-sm font-bold">Main gallery</h3>
             <ImageUploadList
               rows={generalImages}
               onChange={setGeneralImages}
@@ -1014,10 +1089,7 @@ export function ProductCreateForm({ productId }: { productId?: string } = {}) {
 
           {selectedColours.length > 0 ? (
             <div className="space-y-4">
-              <h3 className="text-sm font-medium">Images per colour</h3>
-              <p className="text-muted-foreground text-sm">
-                Optional swatches or variant photos per colour
-              </p>
+              <h3 className="text-sm font-bold">Images per colour</h3>
               <div className="grid gap-4 lg:grid-cols-2">
                 {selectedColours.map((colourId) => {
                   const colour = colours.find((c) => c.id === colourId);
@@ -1027,7 +1099,7 @@ export function ProductCreateForm({ productId }: { productId?: string } = {}) {
                       key={colourId}
                       className="space-y-3 rounded-xl border p-4"
                     >
-                      <div className="flex items-center gap-2 font-medium">
+                      <div className="flex items-center gap-2 font-semibold">
                         {colour?.hexCode ? (
                           <span
                             className="size-4 rounded-full ring-1 ring-border"
@@ -1055,74 +1127,138 @@ export function ProductCreateForm({ productId }: { productId?: string } = {}) {
                 })}
               </div>
             </div>
-          ) : (
-            <p className="text-muted-foreground rounded-lg border border-dashed p-4 text-sm">
-              Add at least one colour in step 3 to attach variant images.
-            </p>
-          )}
+          ) : null}
         </div>
       </FormSection>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <FormSection
-          step={5}
-          title="Pricing"
-          description="Quantity tiers and optional promotional offer"
-        >
+        <FormSection step={5} title="Pricing">
           <div className="space-y-6">
             <div className="space-y-4">
-              <h3 className="text-sm font-medium">Rate tiers</h3>
-              <p className="text-muted-foreground text-sm">
-                Price per metre (or unit) by quantity range
-              </p>
+              <h3 className="text-sm font-bold">Rate tiers</h3>
               {rateTiers.map((tier) => (
-                <div
-                  key={tier.id}
-                  className="grid gap-3 rounded-xl border p-4 sm:grid-cols-5"
-                >
-                  {(
-                    [
-                      "minQuantity",
-                      "maxQuantity",
-                      "originalRate",
-                      "discountedRate",
-                      "shippingCharge",
-                    ] as const
-                  ).map((field) => (
-                    <Field key={field}>
-                      <FieldLabel>
-                        {field === "minQuantity"
-                          ? "Min m"
-                          : field === "maxQuantity"
-                            ? "Max m"
-                            : field === "originalRate"
-                              ? "Original"
-                              : field === "discountedRate"
-                                ? "Discounted"
-                                : "Shipping"}
-                      </FieldLabel>
+                <div key={tier.id} className="space-y-3 rounded-xl border p-4">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Field>
+                      <FieldLabel>Min QTY</FieldLabel>
                       <Input
-                        type="number"
-                        placeholder={field === "maxQuantity" ? "∞" : undefined}
-                        value={tier[field]}
-                        onChange={(e) =>
+                        inputMode="decimal"
+                        placeholder="0"
+                        value={tier.minQuantity}
+                        onChange={(e) => {
                           setRateTiers((prev) =>
                             prev.map((t) =>
                               t.id === tier.id
-                                ? { ...t, [field]: e.target.value }
+                                ? { ...t, minQuantity: e.target.value }
                                 : t,
                             ),
-                          )
-                        }
+                          );
+                          setTierErrors((prev) => {
+                            const next = { ...prev };
+                            delete next[tier.id];
+                            return next;
+                          });
+                        }}
                       />
                     </Field>
-                  ))}
+                    <Field>
+                      <FieldLabel>Max QTY</FieldLabel>
+                      <Input
+                        inputMode="decimal"
+                        placeholder="∞"
+                        value={tier.maxQuantity}
+                        onChange={(e) => {
+                          setRateTiers((prev) =>
+                            prev.map((t) =>
+                              t.id === tier.id
+                                ? { ...t, maxQuantity: e.target.value }
+                                : t,
+                            ),
+                          );
+                          setTierErrors((prev) => {
+                            const next = { ...prev };
+                            delete next[tier.id];
+                            return next;
+                          });
+                        }}
+                      />
+                    </Field>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <Field>
+                      <FieldLabel>Original</FieldLabel>
+                      <Input
+                        inputMode="decimal"
+                        value={tier.originalRate}
+                        onChange={(e) => {
+                          setRateTiers((prev) =>
+                            prev.map((t) =>
+                              t.id === tier.id
+                                ? { ...t, originalRate: e.target.value }
+                                : t,
+                            ),
+                          );
+                          setTierErrors((prev) => {
+                            const next = { ...prev };
+                            delete next[tier.id];
+                            return next;
+                          });
+                        }}
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel>Discounted</FieldLabel>
+                      <Input
+                        inputMode="decimal"
+                        value={tier.discountedRate}
+                        onChange={(e) => {
+                          setRateTiers((prev) =>
+                            prev.map((t) =>
+                              t.id === tier.id
+                                ? { ...t, discountedRate: e.target.value }
+                                : t,
+                            ),
+                          );
+                          setTierErrors((prev) => {
+                            const next = { ...prev };
+                            delete next[tier.id];
+                            return next;
+                          });
+                        }}
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel>Shipping</FieldLabel>
+                      <Input
+                        inputMode="decimal"
+                        value={tier.shippingCharge}
+                        onChange={(e) => {
+                          setRateTiers((prev) =>
+                            prev.map((t) =>
+                              t.id === tier.id
+                                ? { ...t, shippingCharge: e.target.value }
+                                : t,
+                            ),
+                          );
+                          setTierErrors((prev) => {
+                            const next = { ...prev };
+                            delete next[tier.id];
+                            return next;
+                          });
+                        }}
+                      />
+                    </Field>
+                  </div>
+                  {tierErrors[tier.id] ? (
+                    <p className="text-destructive text-xs">
+                      {tierErrors[tier.id]}
+                    </p>
+                  ) : null}
                   {rateTiers.length > 1 && (
                     <Button
                       type="button"
                       variant="ghost"
                       size="sm"
-                      className="sm:col-span-5"
                       onClick={() =>
                         setRateTiers((prev) =>
                           prev.filter((t) => t.id !== tier.id),
@@ -1158,7 +1294,7 @@ export function ProductCreateForm({ productId }: { productId?: string } = {}) {
             <Separator />
 
             <div className="space-y-4">
-              <h3 className="text-sm font-medium">Promotional offer</h3>
+              <h3 className="text-sm font-bold">Promotional offer</h3>
               <div className="flex items-center gap-3">
                 <Switch
                   checked={isOnOffer}
@@ -1189,7 +1325,7 @@ export function ProductCreateForm({ productId }: { productId?: string } = {}) {
                     <Field>
                       <FieldLabel>Offer %</FieldLabel>
                       <Input
-                        type="number"
+                        inputMode="decimal"
                         value={offerPercent}
                         onChange={(e) => setOfferPercent(e.target.value)}
                         placeholder="15"
@@ -1199,7 +1335,7 @@ export function ProductCreateForm({ productId }: { productId?: string } = {}) {
                     <Field>
                       <FieldLabel>Offer price</FieldLabel>
                       <Input
-                        type="number"
+                        inputMode="decimal"
                         value={offerFixedPrice}
                         onChange={(e) => setOfferFixedPrice(e.target.value)}
                       />
@@ -1211,473 +1347,217 @@ export function ProductCreateForm({ productId }: { productId?: string } = {}) {
           </div>
         </FormSection>
 
-        <FormSection
-          step={6}
-          title="Lengths & delivery"
-          description="How customers can order length and when it ships"
-        >
-          <div className="space-y-6">
-            <div className="space-y-4">
-              <h3 className="text-sm font-medium">Available lengths</h3>
-              <MasterSelectAdd
-                label="Length preset"
-                placeholder="Select preset to add row"
-                clearOnSelect
-                onValueChange={(id) => {
-                  setAvailableLengths((prev) => [
-                    ...prev,
-                    {
-                      id: newId(),
-                      lengthPresetId: id,
-                      customValue: "",
-                      customUnit: "METRE",
-                    },
-                  ]);
-                }}
-                options={
-                  options?.lengthPresets.map((p) => ({
-                    id: p.id,
-                    label: p.label ?? `${p.value} ${p.unit}`,
-                  })) ?? []
-                }
-                popoverTitle="New length preset"
-                adding={addingMaster === "lengthPreset"}
-                onConfirmAdd={() =>
-                  createMaster(
-                    "lengthPreset",
-                    {
-                      label: newLengthLabel,
-                      value: parseFloat(newLengthValue),
-                      unit: newLengthUnit,
-                    },
-                    () => {
-                      setNewLengthLabel("");
-                      setNewLengthValue("");
-                    },
-                  )
-                }
-                emptyMessage="No presets — use + to add"
-              >
-                <Input
-                  placeholder="Label e.g. 1 metre"
-                  value={newLengthLabel}
-                  onChange={(e) => setNewLengthLabel(e.target.value)}
-                />
-                <Input
-                  placeholder="Value"
-                  type="number"
-                  value={newLengthValue}
-                  onChange={(e) => setNewLengthValue(e.target.value)}
-                />
-                <Select value={newLengthUnit} onValueChange={setNewLengthUnit}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="METRE">Metre</SelectItem>
-                    <SelectItem value="YARD">Yard</SelectItem>
-                  </SelectContent>
-                </Select>
-              </MasterSelectAdd>
+        <FormSection step={6} title="Available lengths">
+          <div className="space-y-4">
+            <MasterSelectAdd
+              label="Length preset"
+              placeholder="Select preset to add row"
+              masterType="lengthPreset"
+              dialogTitle="New length preset"
+              clearOnSelect
+              onValueChange={(id) => {
+                setAvailableLengths((prev) => [
+                  ...prev,
+                  {
+                    id: newId(),
+                    lengthPresetId: id,
+                    customValue: "",
+                    customUnit: "METRE",
+                  },
+                ]);
+              }}
+              options={
+                options?.lengthPresets.map((p) => ({
+                  id: p.id,
+                  label: p.label ?? `${p.value} ${p.unit}`,
+                })) ?? []
+              }
+              adding={addingMaster === "lengthPreset"}
+              onConfirmAdd={(payload) => createMaster("lengthPreset", payload)}
+              emptyMessage="No presets — use + to add"
+            />
 
-              {availableLengths.map((row) => (
-                <div
-                  key={row.id}
-                  className="grid gap-3 rounded-xl border p-4 sm:grid-cols-4"
-                >
-                  <Field>
-                    <FieldLabel>Preset</FieldLabel>
-                    <Select
-                      value={row.lengthPresetId}
-                      onValueChange={(val) =>
-                        setAvailableLengths((prev) =>
-                          prev.map((l) =>
-                            l.id === row.id ? { ...l, lengthPresetId: val } : l,
-                          ),
-                        )
-                      }
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Or custom below" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {options?.lengthPresets.map((p) => (
-                          <SelectItem key={p.id} value={p.id}>
-                            {p.label ?? `${p.value} ${p.unit}`}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </Field>
-                  <Field>
-                    <FieldLabel>Custom value</FieldLabel>
-                    <Input
-                      type="number"
-                      value={row.customValue}
-                      onChange={(e) =>
-                        setAvailableLengths((prev) =>
-                          prev.map((l) =>
-                            l.id === row.id
-                              ? { ...l, customValue: e.target.value }
-                              : l,
-                          ),
-                        )
-                      }
-                    />
-                  </Field>
-                  <Field>
-                    <FieldLabel>Unit</FieldLabel>
-                    <Select
-                      value={row.customUnit}
-                      onValueChange={(val) =>
-                        setAvailableLengths((prev) =>
-                          prev.map((l) =>
-                            l.id === row.id ? { ...l, customUnit: val } : l,
-                          ),
-                        )
-                      }
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="METRE">Metre</SelectItem>
-                        <SelectItem value="YARD">Yard</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </Field>
-                  <div className="flex items-end">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() =>
-                        setAvailableLengths((prev) =>
-                          prev.filter((l) => l.id !== row.id),
-                        )
-                      }
-                    >
-                      Remove
-                    </Button>
-                  </div>
+            {availableLengths.map((row) => (
+              <div
+                key={row.id}
+                className="grid gap-3 rounded-xl border p-4 sm:grid-cols-4"
+              >
+                <Field>
+                  <FieldLabel>Preset</FieldLabel>
+                  <Select
+                    value={row.lengthPresetId}
+                    onValueChange={(val) =>
+                      setAvailableLengths((prev) =>
+                        prev.map((l) =>
+                          l.id === row.id ? { ...l, lengthPresetId: val } : l,
+                        ),
+                      )
+                    }
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Or custom below" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {options?.lengthPresets.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.label ?? `${p.value} ${p.unit}`}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field>
+                  <FieldLabel>Custom value</FieldLabel>
+                  <Input
+                    inputMode="decimal"
+                    value={row.customValue}
+                    onChange={(e) =>
+                      setAvailableLengths((prev) =>
+                        prev.map((l) =>
+                          l.id === row.id
+                            ? { ...l, customValue: e.target.value }
+                            : l,
+                        ),
+                      )
+                    }
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel>Unit</FieldLabel>
+                  <Select
+                    value={row.customUnit}
+                    onValueChange={(val) =>
+                      setAvailableLengths((prev) =>
+                        prev.map((l) =>
+                          l.id === row.id ? { ...l, customUnit: val } : l,
+                        ),
+                      )
+                    }
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="METRE">Metre</SelectItem>
+                      <SelectItem value="YARD">Yard</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <div className="flex items-end">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() =>
+                      setAvailableLengths((prev) =>
+                        prev.filter((l) => l.id !== row.id),
+                      )
+                    }
+                  >
+                    Remove
+                  </Button>
                 </div>
-              ))}
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() =>
-                  setAvailableLengths((prev) => [
-                    ...prev,
-                    { id: newId(), customValue: "", customUnit: "METRE" },
-                  ])
-                }
-              >
-                Add length option
-              </Button>
-            </div>
-
-            <Separator />
-
-            <div className="space-y-4">
-              <h3 className="text-sm font-medium">Lead time & availability</h3>
-              <div className="grid gap-4">
-                <Field>
-                  <FieldLabel htmlFor="leadDays">Lead time (days)</FieldLabel>
-                  <Input
-                    id="leadDays"
-                    type="number"
-                    value={leadTimeDays}
-                    onChange={(e) => setLeadTimeDays(e.target.value)}
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="leadDate">Lead time date</FieldLabel>
-                  <Input
-                    id="leadDate"
-                    type="date"
-                    value={leadTimeDate}
-                    onChange={(e) => setLeadTimeDate(e.target.value)}
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="availDate">Availability date</FieldLabel>
-                  <Input
-                    id="availDate"
-                    type="date"
-                    value={availabilityDate}
-                    onChange={(e) => setAvailabilityDate(e.target.value)}
-                  />
-                </Field>
               </div>
-            </div>
+            ))}
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() =>
+                setAvailableLengths((prev) => [
+                  ...prev,
+                  { id: newId(), customValue: "", customUnit: "METRE" },
+                ])
+              }
+            >
+              Add length option
+            </Button>
           </div>
         </FormSection>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <FormSection
-          step={7}
-          title="Collections & tags"
-          description="How this product is grouped and filtered in the shop"
-        >
-          <div className="space-y-6">
-            <FieldSet>
-              <MasterSelectAdd
-                label="Collection"
-                placeholder="Select collection to add"
-                clearOnSelect
-                onValueChange={(id) => {
-                  if (!selectedCollections.includes(id)) {
-                    setSelectedCollections((prev) => [...prev, id]);
-                  }
-                }}
-                options={
-                  options?.collections
-                    .filter((c) => !selectedCollections.includes(c.id))
-                    .map((c) => ({
-                      id: c.id,
-                      label: formatCollectionLabel(c.name, c.parent?.name),
-                    })) ?? []
-                }
-                popoverTitle="New collection"
-                adding={addingMaster === "collection"}
-                onConfirmAdd={() =>
-                  createMaster(
-                    "collection",
-                    {
-                      name: newCollectionName,
-                      parentId: newCollectionParentId || null,
-                    },
-                    (item) => {
-                      setSelectedCollections((prev) => [...prev, item.id]);
-                      setNewCollectionName("");
-                      setNewCollectionParentId(undefined);
-                    },
-                  )
-                }
-              >
-                <Input
-                  placeholder="Collection name"
-                  value={newCollectionName}
-                  onChange={(e) => setNewCollectionName(e.target.value)}
-                />
-                <Select
-                  value={newCollectionParentId ?? "__none__"}
-                  onValueChange={(v) =>
-                    setNewCollectionParentId(v === "__none__" ? undefined : v)
-                  }
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Parent (optional)" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">
-                      Top-level collection
-                    </SelectItem>
-                    {options?.collections.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>
-                        {formatCollectionLabel(c.name, c.parent?.name)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </MasterSelectAdd>
-              {selectedCollections.length > 0 && (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {selectedCollections.map((id) => {
-                    const col = options?.collections.find((c) => c.id === id);
-                    return (
-                      <Badge
-                        key={id}
-                        variant="secondary"
-                        className="gap-2 py-1 pr-1 pl-2"
-                      >
-                        {col
-                          ? formatCollectionLabel(col.name, col.parent?.name)
-                          : id}
-                        <button
-                          type="button"
-                          className="hover:bg-muted rounded px-1 text-xs"
-                          onClick={() =>
-                            setSelectedCollections((prev) =>
-                              prev.filter((x) => x !== id),
-                            )
-                          }
-                        >
-                          ×
-                        </button>
-                      </Badge>
-                    );
-                  })}
-                </div>
-              )}
-            </FieldSet>
-
-            <Separator />
-
-            <FieldSet>
-              <MasterSelectAdd
-                label="Tag"
-                placeholder="Select tag to add"
-                clearOnSelect
-                onValueChange={(id) => {
-                  if (!selectedTags.includes(id)) {
-                    setSelectedTags((prev) => [...prev, id]);
-                  }
-                }}
-                options={
-                  options?.tags
-                    .filter((t) => !selectedTags.includes(t.id))
-                    .map((t) => ({ id: t.id, label: t.name })) ?? []
-                }
-                popoverTitle="New tag"
-                adding={addingMaster === "tag"}
-                onConfirmAdd={() =>
-                  createMaster("tag", { name: newTagName }, (item) => {
-                    setSelectedTags((prev) => [...prev, item.id]);
-                    setNewTagName("");
-                  })
-                }
-              >
-                <Input
-                  placeholder="Tag name"
-                  value={newTagName}
-                  onChange={(e) => setNewTagName(e.target.value)}
-                />
-              </MasterSelectAdd>
-              {selectedTags.length > 0 && (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {selectedTags.map((id) => {
-                    const tag = options?.tags.find((t) => t.id === id);
-                    return (
-                      <Badge
-                        key={id}
-                        variant="secondary"
-                        className="gap-2 py-1 pr-1 pl-2"
-                      >
-                        {tag?.name}
-                        <button
-                          type="button"
-                          className="hover:bg-muted rounded px-1 text-xs"
-                          onClick={() =>
-                            setSelectedTags((prev) =>
-                              prev.filter((x) => x !== id),
-                            )
-                          }
-                        >
-                          ×
-                        </button>
-                      </Badge>
-                    );
-                  })}
-                </div>
-              )}
-            </FieldSet>
-          </div>
+        <FormSection step={7} title="Lead time & availability">
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor="leadDays">Lead time (days)</FieldLabel>
+              <Input
+                id="leadDays"
+                inputMode="numeric"
+                value={leadTimeDays}
+                onChange={(e) => setLeadTimeDays(e.target.value)}
+              />
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="leadDate">Lead time date</FieldLabel>
+              <Input
+                id="leadDate"
+                type="date"
+                value={leadTimeDate}
+                onChange={(e) => setLeadTimeDate(e.target.value)}
+              />
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="availDate">Availability date</FieldLabel>
+              <Input
+                id="availDate"
+                type="date"
+                value={availabilityDate}
+                onChange={(e) => setAvailabilityDate(e.target.value)}
+              />
+            </Field>
+          </FieldGroup>
         </FormSection>
 
-        <FormSection
-          step={8}
-          title="Care & SEO"
-          description="Washing instructions and search listing text"
-        >
-          <div className="space-y-6">
-            <div className="space-y-4">
-              <h3 className="text-sm font-medium">Care & washing</h3>
-              <MasterSelectAdd
-                label="Care instruction"
-                placeholder="Select to add"
-                clearOnSelect
-                onValueChange={(id) => {
-                  if (!selectedCare.includes(id)) {
-                    setSelectedCare((prev) => [...prev, id]);
-                  }
-                }}
-                options={
-                  options?.careInstructions
-                    .filter((c) => !selectedCare.includes(c.id))
-                    .map((c) => ({ id: c.id, label: c.title })) ?? []
-                }
-                popoverTitle="New care instruction"
-                adding={addingMaster === "care"}
-                onConfirmAdd={() =>
-                  createMaster(
-                    "care",
-                    { title: newCareTitle, description: newCareDesc },
-                    (item) => {
-                      setSelectedCare((prev) => [...prev, item.id]);
-                      setNewCareTitle("");
-                      setNewCareDesc("");
-                    },
-                  )
-                }
-              >
-                <Input
-                  placeholder="Title e.g. Machine wash cold"
-                  value={newCareTitle}
-                  onChange={(e) => setNewCareTitle(e.target.value)}
-                />
-                <Input
-                  placeholder="Description (optional)"
-                  value={newCareDesc}
-                  onChange={(e) => setNewCareDesc(e.target.value)}
-                />
-              </MasterSelectAdd>
+        <FormSection step={8} title="Care instructions">
+          <MasterSelectAdd
+            label="Care instruction"
+            placeholder="Select to add"
+            masterType="care"
+            dialogTitle="New care instruction"
+            clearOnSelect
+            onValueChange={(id) => {
+              if (!selectedCare.includes(id)) {
+                setSelectedCare((prev) => [...prev, id]);
+              }
+            }}
+            options={
+              options?.careInstructions
+                .filter((c) => !selectedCare.includes(c.id))
+                .map((c) => ({ id: c.id, label: c.title })) ?? []
+            }
+            adding={addingMaster === "care"}
+            onConfirmAdd={(payload) =>
+              createMaster("care", payload, (item) => {
+                setSelectedCare((prev) => [...prev, item.id]);
+              })
+            }
+          />
 
-              {selectedCare.length > 0 ? (
-                <div className="flex flex-wrap gap-2">
-                  {selectedCare.map((id) => {
-                    const care = options?.careInstructions.find(
-                      (c) => c.id === id,
-                    );
-                    return (
-                      <Badge
-                        key={id}
-                        variant="secondary"
-                        className="gap-2 py-1 pr-1 pl-2"
-                      >
-                        {care?.title}
-                        <button
-                          type="button"
-                          className="hover:bg-muted rounded px-1 text-xs"
-                          onClick={() =>
-                            setSelectedCare((prev) =>
-                              prev.filter((x) => x !== id),
-                            )
-                          }
-                        >
-                          ×
-                        </button>
-                      </Badge>
-                    );
-                  })}
-                </div>
-              ) : null}
+          {selectedCare.length > 0 ? (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {selectedCare.map((id) => {
+                const care = options?.careInstructions.find((c) => c.id === id);
+                return (
+                  <Badge
+                    key={id}
+                    variant="secondary"
+                    className="gap-2 py-1 pr-1 pl-2"
+                  >
+                    {care?.title}
+                    <button
+                      type="button"
+                      className="hover:bg-muted rounded px-1 text-xs"
+                      onClick={() =>
+                        setSelectedCare((prev) => prev.filter((x) => x !== id))
+                      }
+                    >
+                      ×
+                    </button>
+                  </Badge>
+                );
+              })}
             </div>
-
-            <Separator />
-
-            <FieldGroup>
-              <h3 className="text-sm font-medium">Search listing (SEO)</h3>
-              <Field>
-                <FieldLabel htmlFor="metaTitle">Meta title</FieldLabel>
-                <Input
-                  id="metaTitle"
-                  value={metaTitle}
-                  onChange={(e) => setMetaTitle(e.target.value)}
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="metaDesc">Meta description</FieldLabel>
-                <Textarea
-                  id="metaDesc"
-                  value={metaDesc}
-                  onChange={(e) => setMetaDesc(e.target.value)}
-                  rows={2}
-                />
-              </Field>
-            </FieldGroup>
-          </div>
+          ) : null}
         </FormSection>
       </div>
 
@@ -1701,13 +1581,11 @@ export function ProductCreateForm({ productId }: { productId?: string } = {}) {
 function FormSection({
   step,
   title,
-  description,
   children,
   className,
 }: {
   step: number;
   title: string;
-  description?: string;
   children: React.ReactNode;
   className?: string;
 }) {
@@ -1720,9 +1598,6 @@ function FormSection({
           </span>
           <div className="min-w-0 flex-1">
             <CardTitle>{title}</CardTitle>
-            {description ? (
-              <CardDescription className="mt-1">{description}</CardDescription>
-            ) : null}
           </div>
         </div>
       </CardHeader>
@@ -1753,74 +1628,69 @@ function ImageUploadList({
 
   return (
     <div className="space-y-3">
-      {rows.map((row) => (
-        <div
-          key={row.id}
-          className="flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-start"
-        >
-          <div className="flex size-20 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted">
-            {row.preview || row.url ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={row.preview || row.url}
-                alt=""
-                className="size-full object-cover"
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        {rows.map((row) => (
+          <div key={row.id} className="space-y-2">
+            <label className="relative block aspect-square cursor-pointer overflow-hidden rounded-lg border bg-muted">
+              <input
+                type="file"
+                accept="image/*"
+                className="sr-only"
+                disabled={row.uploading}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) stageImage(f, row.id, setter);
+                  e.target.value = "";
+                }}
               />
-            ) : (
-              <span className="text-muted-foreground text-xs">No image</span>
-            )}
+              {row.preview || row.url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={row.preview || row.url}
+                  alt=""
+                  className="size-full object-cover"
+                />
+              ) : (
+                <span className="text-muted-foreground absolute inset-0 flex items-center justify-center text-xs">
+                  Add image
+                </span>
+              )}
+              {row.uploading ? (
+                <span className="absolute inset-0 flex items-center justify-center bg-background/70">
+                  <Spinner />
+                </span>
+              ) : null}
+            </label>
+            <div className="flex gap-1.5">
+              <Input
+                placeholder="Alt text"
+                value={row.altText ?? ""}
+                className="h-8 min-w-0 flex-1 text-xs"
+                onChange={(e) =>
+                  setter((prev) =>
+                    prev.map((img) =>
+                      img.id === row.id
+                        ? { ...img, altText: e.target.value }
+                        : img,
+                    ),
+                  )
+                }
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="size-8 shrink-0"
+                disabled={rows.length === 1 && !row.url && !row.file}
+                onClick={() => removeImage(row, setter)}
+                aria-label="Remove image"
+              >
+                ×
+              </Button>
+            </div>
           </div>
-          <div className="flex flex-1 flex-col gap-2">
-            <Input
-              type="file"
-              accept="image/*"
-              disabled={row.uploading}
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) stageImage(f, row.id, setter);
-                e.target.value = "";
-              }}
-            />
-            <Input
-              placeholder="Alt text (optional)"
-              value={row.altText ?? ""}
-              onChange={(e) =>
-                setter((prev) =>
-                  prev.map((img) =>
-                    img.id === row.id
-                      ? { ...img, altText: e.target.value }
-                      : img,
-                  ),
-                )
-              }
-            />
-            {row.file && !row.url ? (
-              <Badge variant="outline" className="w-fit text-xs">
-                Will upload when you save
-              </Badge>
-            ) : null}
-            {row.url ? (
-              <Badge variant="secondary" className="w-fit text-xs">
-                Saved
-              </Badge>
-            ) : null}
-            {row.uploading ? (
-              <span className="text-muted-foreground flex items-center gap-2 text-sm">
-                <Spinner /> Uploading…
-              </span>
-            ) : null}
-          </div>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            disabled={rows.length === 1 && !row.url && !row.file}
-            onClick={() => removeImage(row, setter)}
-          >
-            Remove
-          </Button>
-        </div>
-      ))}
+        ))}
+      </div>
       <Button
         type="button"
         variant="outline"
