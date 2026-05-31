@@ -1,21 +1,24 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, Figtree } from "next/font/google";
+import { Geist, Geist_Mono, Inter } from "next/font/google";
 
 import { Providers } from "@/components/providers";
 import { cn } from "@/lib/utils";
 
 import "./globals.css";
 
-const figtree = Figtree({ subsets: ["latin"], variable: "--font-sans" });
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const inter = Inter({
   subsets: ["latin"],
+  variable: "--font-sans",
+});
+
+const geistHeading = Geist({
+  subsets: ["latin"],
+  variable: "--font-heading",
 });
 
 const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
   subsets: ["latin"],
+  variable: "--font-geist-mono",
 });
 
 export const metadata: Metadata = {
@@ -33,12 +36,10 @@ export default function RootLayout({
       lang="en"
       suppressHydrationWarning
       className={cn(
-        "h-full",
-        "antialiased",
-        geistSans.variable,
+        "h-full font-sans antialiased",
+        inter.variable,
+        geistHeading.variable,
         geistMono.variable,
-        "font-sans",
-        figtree.variable,
       )}
     >
       <body className="min-h-full flex flex-col">

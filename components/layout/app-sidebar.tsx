@@ -22,17 +22,23 @@ import {
   MASTER_TYPES,
   type MasterType,
 } from "@/lib/masters-config";
+import {
+  MASTER_NAV_ICONS,
+  productAddIcon,
+  productListIcon,
+} from "@/lib/navigation-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Database01Icon, Layers01Icon } from "@hugeicons/core-free-icons";
 
 const productNav = [
   {
     title: "All products",
     href: "/products",
+    icon: productListIcon,
   },
   {
     title: "Add product",
     href: "/products/new",
+    icon: productAddIcon,
   },
 ] as const;
 
@@ -71,7 +77,7 @@ export function AppSidebar() {
                     tooltip={item.title}
                   >
                     <Link href={item.href}>
-                      <HugeiconsIcon icon={Layers01Icon} strokeWidth={2} />
+                      <HugeiconsIcon icon={item.icon} strokeWidth={2} />
                       <span>{item.title}</span>
                     </Link>
                   </SidebarMenuButton>
@@ -93,7 +99,10 @@ export function AppSidebar() {
                     tooltip={item.title}
                   >
                     <Link href={item.href}>
-                      <HugeiconsIcon icon={Database01Icon} strokeWidth={2} />
+                      <HugeiconsIcon
+                        icon={MASTER_NAV_ICONS[item.type]}
+                        strokeWidth={2}
+                      />
                       <span>{item.title}</span>
                     </Link>
                   </SidebarMenuButton>

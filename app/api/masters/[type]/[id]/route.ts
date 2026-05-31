@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { resolveCollectionParentId } from "@/lib/resolve-collection-parent";
+import { resolveCollectionParentId } from "@/app/api/masters/route";
 import { db } from "@/lib/db";
+import { slugify } from "@/lib/format";
 import { isMasterType } from "@/lib/masters-config";
-import { slugify } from "@/lib/slug";
 
 type RouteContext = { params: Promise<{ type: string; id: string }> };
 

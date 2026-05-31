@@ -1,7 +1,7 @@
 "use client";
 
 import { useTheme } from "next-themes";
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 
 import {
   DropdownMenu,
@@ -40,13 +40,17 @@ function getThemeLabel(theme: string | undefined) {
   return themes.find((t) => t.value === theme)?.label ?? "Theme";
 }
 
+function useMounted() {
+  return useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
+}
+
 export function SidebarThemeToggle() {
   const { theme, setTheme } = useTheme();
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  const mounted = useMounted();
 
   const current = (theme ?? "system") as ThemeValue;
   const TriggerIcon = getThemeIcon(mounted ? current : "system");

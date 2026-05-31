@@ -29,8 +29,8 @@ import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { MasterSelectAdd } from "@/components/products/master-select-add";
-import { formatCollectionLabel } from "@/lib/collection-label";
-import { slugify } from "@/lib/slug";
+import { formatCollectionLabel } from "@/lib/collections";
+import { slugify } from "@/lib/format";
 
 type FormOptions = {
   widths: { id: string; label: string; valueInCm?: string | null }[];
@@ -265,18 +265,36 @@ export function ProductCreateForm({ productId }: { productId?: string } = {}) {
   }, []);
 
   useEffect(() => {
-    loadOptions()
-      .catch(() => toast.error("Failed to load form options"))
-      .finally(() => setLoadingOptions(false));
-  }, [loadOptions]);
+    let cancelled = false;
+
+    fetch("/api/products/options")
+      .then((res) => res.json())
+      .then((data) => {
+        if (cancelled) return;
+        if (data.error) throw new Error(data.error);
+        setOptions(data);
+      })
+      .catch(() => {
+        if (!cancelled) toast.error("Failed to load form options");
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingOptions(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!productId || !options) return;
 
-    setLoadingProduct(true);
+    let cancelled = false;
+
     fetch(`/api/products/${productId}`)
       .then((res) => res.json())
       .then((data) => {
+        if (cancelled) return;
         if (data.error) throw new Error(data.error);
         const p = data.product;
 
@@ -392,8 +410,16 @@ export function ProductCreateForm({ productId }: { productId?: string } = {}) {
           (p.productTags ?? []).map((t: { tagId: string }) => t.tagId),
         );
       })
-      .catch(() => toast.error("Failed to load product"))
-      .finally(() => setLoadingProduct(false));
+      .catch(() => {
+        if (!cancelled) toast.error("Failed to load product");
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingProduct(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [productId, options]);
 
   const createMaster = async (

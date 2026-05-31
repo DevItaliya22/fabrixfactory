@@ -31,7 +31,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatCollectionLabel } from "@/lib/collection-label";
+import { formatCollectionLabel } from "@/lib/collections";
 import { MASTER_LABELS, type MasterType } from "@/lib/masters-config";
 
 const PARENT_NONE = "__none__";
@@ -174,6 +174,10 @@ function buildPayload(
 }
 
 export function MastersManager({ type }: { type: MasterType }) {
+  return <MastersManagerInner key={type} type={type} />;
+}
+
+function MastersManagerInner({ type }: { type: MasterType }) {
   const [data, setData] = useState<MastersData | null>(null);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -182,12 +186,6 @@ export function MastersManager({ type }: { type: MasterType }) {
   const [form, setForm] = useState<Record<string, string>>({});
 
   const isEditing = editingId != null;
-
-  useEffect(() => {
-    setForm({});
-    setEditingId(null);
-    setDialogOpen(false);
-  }, [type]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -204,8 +202,26 @@ export function MastersManager({ type }: { type: MasterType }) {
   }, []);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res = await fetch("/api/masters");
+        const json = await res.json();
+        if (cancelled) return;
+        if (json.error) throw new Error(json.error);
+        setData(json as MastersData);
+      } catch {
+        if (!cancelled) toast.error("Failed to load masters");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const items = data?.[type] ?? [];
 

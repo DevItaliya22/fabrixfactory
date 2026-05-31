@@ -37,3 +37,12 @@ export function serializeProduct<T extends Record<string, unknown>>(
 
   return out as T;
 }
+
+export function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .trim()
+    .replace(/[^\w\s-]/g, "")
+    .replace(/[\s_-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}

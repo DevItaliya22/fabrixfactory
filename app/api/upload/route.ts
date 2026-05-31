@@ -5,7 +5,7 @@ import {
   getPublicUrl,
   getSignedGetUrl,
   uploadImageToR2,
-} from "@/lib/r2-storage";
+} from "@/lib/r2";
 
 export const runtime = "nodejs";
 

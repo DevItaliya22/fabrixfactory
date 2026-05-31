@@ -40,20 +40,26 @@ export function ProductList() {
   const [products, setProducts] = useState<ProductRow[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const load = () => {
-    setLoading(true);
+  useEffect(() => {
+    let cancelled = false;
+
     fetch("/api/products")
       .then((res) => res.json())
       .then((data) => {
+        if (cancelled) return;
         if (data.error) throw new Error(data.error);
         setProducts(data.products);
       })
-      .catch(() => toast.error("Failed to load products"))
-      .finally(() => setLoading(false));
-  };
+      .catch(() => {
+        if (!cancelled) toast.error("Failed to load products");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
 
-  useEffect(() => {
-    load();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   if (loading) {

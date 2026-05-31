@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { db } from "@/lib/db";
-import { productDetailInclude } from "@/lib/product-include";
-import { serializeProduct } from "@/lib/serialize";
-import { slugify } from "@/lib/slug";
-import { syncProductRelations } from "@/lib/sync-product-relations";
+import { serializeProduct, slugify } from "@/lib/format";
+import { productDetailInclude, syncProductRelations } from "@/lib/products";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
