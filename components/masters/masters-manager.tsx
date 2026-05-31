@@ -31,6 +31,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { CareMastersManager } from "@/components/masters/care-masters-manager";
 import { formatCollectionLabel } from "@/lib/collections";
 import { MASTER_LABELS, type MasterType } from "@/lib/masters-config";
 
@@ -174,6 +175,10 @@ function buildPayload(
 }
 
 export function MastersManager({ type }: { type: MasterType }) {
+  if (type === "care") {
+    return <CareMastersManager />;
+  }
+
   return <MastersManagerInner key={type} type={type} />;
 }
 

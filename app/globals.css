@@ -128,3 +128,66 @@
     @apply font-sans;
   }
 }
+
+@layer components {
+  .prose-editor p.is-editor-empty:first-child::before {
+    color: var(--muted-foreground);
+    content: attr(data-placeholder);
+    float: left;
+    height: 0;
+    pointer-events: none;
+  }
+
+  .prose-editor :first-child {
+    margin-top: 0;
+  }
+
+  .prose-editor :last-child {
+    margin-bottom: 0;
+  }
+
+  .prose-editor p {
+    margin: 0.5rem 0;
+  }
+
+  .prose-editor h2 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    line-height: 1.4;
+    margin: 1rem 0 0.5rem;
+  }
+
+  .prose-editor h3 {
+    font-size: 1.125rem;
+    font-weight: 600;
+    line-height: 1.4;
+    margin: 0.75rem 0 0.5rem;
+  }
+
+  .prose-editor ul,
+  .prose-editor ol {
+    margin: 0.5rem 0;
+    padding-left: 1.5rem;
+  }
+
+  .prose-editor ul {
+    list-style: disc;
+  }
+
+  .prose-editor ol {
+    list-style: decimal;
+  }
+
+  .prose-editor blockquote {
+    border-left: 3px solid var(--border);
+    color: var(--muted-foreground);
+    margin: 0.75rem 0;
+    padding-left: 0.75rem;
+  }
+
+  .prose-editor a {
+    color: var(--primary);
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+}

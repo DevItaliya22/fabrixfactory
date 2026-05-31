@@ -27,6 +27,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
+import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { Textarea } from "@/components/ui/textarea";
 import { MasterSelectAdd } from "@/components/products/master-select-add";
 import { formatCollectionLabel } from "@/lib/collections";
@@ -749,11 +750,10 @@ export function ProductCreateForm({ productId }: { productId?: string } = {}) {
           </div>
           <Field>
             <FieldLabel htmlFor="description">Description</FieldLabel>
-            <Textarea
+            <RichTextEditor
               id="description"
               value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              rows={4}
+              onChange={setDescription}
               placeholder="Fabric feel, use cases, key selling points…"
             />
           </Field>
