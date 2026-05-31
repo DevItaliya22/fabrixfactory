@@ -1,0 +1,54 @@
+---
+description: Core project conventions — Prisma, structure, auth, proxy
+alwaysApply: true
+---
+
+# Hotel project standards
+
+## Prisma
+
+- Never run `prisma migrate` or `prisma db push`.
+- `prisma generate` is allowed when the schema changes.
+
+## Quality checks
+
+- Do not run `npm run build` (or equivalent full builds) only to check lint or types. Use the editor/linter or targeted checks.
+
+## Code style
+
+- Write clean, senior-level code: correct formatting, minimal scope, no dead code.
+- Add files and helpers only when they earn their place; do not split or abstract prematurely.
+
+## Folder layout
+
+- `app/` — routes only: pages, layouts, and API route handlers.
+- `components/` (repo root) — all reusable UI. Do not add `_components` or other component folders under `app/`.
+- `lib/`, `types/`, etc. — shared non-UI logic.
+
+## Auth — API routes
+
+- Non-public API handlers must use `withAdminAuth` from `@/lib/auth`.
+- Public APIs (e.g. NextAuth at `/api/auth/*`) skip admin checks.
+- Page protection is separate (see below); do not rely on API guards for page access alone.
+
+## Auth — pages
+
+- Protected admin pages must use `withAdminSession` from `@/lib/auth` at the page level (HOC), not ad-hoc `auth()` + redirect in every file.
+- Login and other intentionally public admin routes stay unwrapped.
+
+## Middleware
+
+- Use `proxy.ts` (not `middleware.ts`) for edge middleware: redirects, matchers, and request-level auth gating. Keep business logic in `lib/` and route handlers.
+
+## Deprecations and breaking changes
+
+- Never add `@deprecated`, silent aliases, or remove/rename exports without asking the user first.
+- If the user approves deprecation, ask: replace all usages, or leave old code commented for reference?
+- If you made a questionable choice (extra abstraction, alias, dead code, scope creep), say so briefly in the reply — do not hide it.
+
+## Replies to the user
+
+- Default to short answers: what changed and why, in a few lines.
+- Do not paste large code blocks or repeat existing code unless the user asked for it.
+The below rule is super strict and you will follow it in 99.99% time unless asked to do something in detail and talk in detail
+- Skip long summaries, checklists of every file touched, and restating rules back to the user.
