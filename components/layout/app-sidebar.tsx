@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { signOut } from "next-auth/react";
 
 import { SidebarThemeToggle } from "@/components/layout/sidebar-theme-toggle";
 import {
@@ -113,6 +114,16 @@ export function AppSidebar() {
         </SidebarGroup>
       </SidebarContent>
       <SidebarFooter>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              tooltip="Sign out"
+              onClick={() => signOut({ callbackUrl: "/login" })}
+            >
+              <span>Sign out</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
         <SidebarThemeToggle />
       </SidebarFooter>
       <SidebarRail />
