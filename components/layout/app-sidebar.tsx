@@ -24,6 +24,7 @@ import {
   type MasterType,
 } from "@/lib/masters-config";
 import {
+  designNavIcon,
   MASTER_NAV_ICONS,
   productAddIcon,
   productListIcon,
@@ -40,6 +41,11 @@ const productNav = [
     title: "Add product",
     href: "/products/new",
     icon: productAddIcon,
+  },
+  {
+    title: "Designs",
+    href: "/designs",
+    icon: designNavIcon,
   },
 ] as const;
 
@@ -73,7 +79,9 @@ export function AppSidebar() {
                       pathname === item.href ||
                       (item.href === "/products" &&
                         pathname.startsWith("/products/") &&
-                        pathname !== "/products/new")
+                        pathname !== "/products/new") ||
+                      (item.href === "/designs" &&
+                        pathname.startsWith("/designs"))
                     }
                     tooltip={item.title}
                   >

@@ -2,6 +2,7 @@ import {
   AddCircleIcon,
   ColorsIcon,
   CollectionsBookmarkIcon,
+  GridIcon,
   HorizontalResizeIcon,
   MaterialAndTextureIcon,
   Package01Icon,
@@ -24,3 +25,4 @@ export const MASTER_NAV_ICONS: Record<MasterType, typeof ColorsIcon> = {
 
 export const productListIcon = Package01Icon;
 export const productAddIcon = AddCircleIcon;
+export const designNavIcon = GridIcon;

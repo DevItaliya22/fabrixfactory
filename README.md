@@ -7,3 +7,9 @@
 * Care & washing instructions
 * Lead time / availability
 * contruction -> kai rete bane 
+
+
+design number -> stitch[] , area[] , manufacturing company[] , fabric, multiple design can be there in single design numbr 
+
+
+sku code -> fabric name + desig number (multiple in seq) + (foil or digital)  
